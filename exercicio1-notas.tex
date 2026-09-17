@@ -1,0 +1,873 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xltabular}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable,skins}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{lmodern}
+\usepackage{parskip}
+
+\hypersetup{colorlinks=true, linkcolor=blue!60!black, urlcolor=blue!60!black}
+
+\definecolor{codebg}{gray}{0.96}
+\definecolor{codecomment}{rgb}{0.25,0.45,0.25}
+\definecolor{codekw}{rgb}{0.13,0.13,0.55}
+\definecolor{codestr}{rgb}{0.55,0.25,0.25}
+
+\lstset{
+  language=Python,
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  commentstyle=\color{codecomment}\itshape,
+  keywordstyle=\color{codekw}\bfseries,
+  stringstyle=\color{codestr},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  framerule=0pt,
+  xleftmargin=1em,
+  aboveskip=1em,
+  belowskip=1em,
+}
+\lstdefinestyle{shell}{language=bash,keywordstyle=\color{codekw}}
+
+% ---- notacao do exercicio -------------------------------------------------
+\newcommand{\Om}{\Omega_m}
+\newcommand{\OL}{\Omega_\Lambda}
+\newcommand{\Ok}{\Omega_k}
+\newcommand{\M}{\mathcal{M}}
+
+% ---- caixa das notas que eu ainda tenho que escrever ----------------------
+\newtcolorbox{escrever}[1][Para escrever]{
+  colback=yellow!6, colframe=orange!55!black, coltitle=white,
+  fonttitle=\bfseries\small, title={#1},
+  boxrule=0.6pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
+  breakable
+}
+
+% ---- marcador de lacuna --------------------------------------------------
+\newcommand{\pendente}[1]{\textcolor{red!70!black}{\textbf{[#1]}}}
+
+\title{\textbf{Notas para o exercício 1 de cosmologia}\\[0.4em]
+\large Exercício 1 de Cosmologia Numérica}
+\author{Fabio Fioravante \\ \small Cosmologia Numérica --- Exercício 1}
+\date{Setembro de 2026}
+
+\begin{document}
+\maketitle
+
+Estas são as notas pessoais que eu tomei enquanto aprendia as ferramentas de cosmologia e estatística que usei no Exercício 1 da disciplina
+de Cosmologia Numérica, junto com os detalhes das decisões e dos resultados que ficaram de fora do README. O README,
+\texttt{exercicio1-readme.tex}, é curto e traz só o necessário para usar o código e as hipóteses assumidas.
+
+\tableofcontents
+
+% ==========================================================================
+\section{Introdução}
+\label{sec:historia}
+
+Supernovas são velas-padrão, então têm mais ou menos o mesmo brilho intrínseco por que acontecem 
+mais ou menos na mesma época e condições de uma estrela. Com isso podemos saber qual a distância que elas estão, 
+olhando justamente para a discrepância entre o brilho previsto e o observado para cada uma delas, e o redshift, comparando
+a frequência da luz que chega e a prevista.
+
+A partir desses dados podemos estimar os parâmetros cosmológicos que queremos, pois eles controlam o ritmo de expansão do universo, e
+portanto a relação entre distância e redshift.
+
+Para a parte de estatística que vai servir de ferramenta para interpretar os dados, vimos em aula, o teorema de bayes é 
+\begin{equation}
+    P(\theta|d)=\frac{P(d|\theta) P(\theta)}{P(d)},
+\end{equation}
+que com os nomes é algo do tipo
+\begin{equation}
+    \text{posteriori}=\frac{\text{likelihood}\times\text{priori}}{\text{evidência}}
+\end{equation}
+
+O que queremos é encontrar a distribuição de $\Omega_m$ e $\Omega_\Lambda$ que melhores se ajustam aos dados. A evidência é uma normalização que não vai importar aqui, por ser a mesma para todas as posteriores, então vamos descartá-la.
+Basicamente, damos a priori, que é o que achamos razoável antes de olhar os dados, e a likelihood, que é a nota que cada curva recebe de 
+acordo com os dados e os erros. Ademais, os erros das supernovas não são independentes, portanto, precisamos lidar com a matriz de covariância, que registra quais erros são correlacionados.
+
+Para calcularmos a posteriori, uma forma é fazer uma grade de valores de $(\Omega_m, \Omega_\Lambda)$, e calcular a posteriori para cada ponto da grade. 
+Mas isso explode quando temos mais parâmetros, então vamos usar o MCMC (Markov Chain Monte Carlo), 
+que é faz um passeio aleatório pelo plano $(\Omega_m, \Omega_\Lambda)$ onde, dado um ponto inicial, 
+sorteia um próximopasso, aceita sempre se a posterior melhora, e aceita só às vezes se ela piora. 
+Essa regra faz o passeio passar mais tempo onde a probabilidade é maior, na proporção certa, 
+e, fazendo o historgrama de pontos visitados, por vezes que cada ponto foi visitado, obtemos a posteriori.
+
+Por fim, ainda temos que lidar com o fato de que conhecemos os brilho das supernovas a menos de uma constante, isso faz com que todas as
+distâncias previstas tenham que ser ajustadas por uma constante $\M$, que o exercício pede para lidarmos.
+
+% ==========================================================================
+\section{O que o código faz}
+
+Essa seção explica passo a passo o que cada módulo faz, como foi pensado, o que foi admitido e o que foi testado.
+
+% --------------------------------------------------------------------------
+\subsection{Por que o pacote é dividido assim}
+
+Um \emph{módulo} em Python é um arquivo \texttt{.py} com funções e classes que
+outros arquivos importam. O pacote é dividido em módulos que não sabem nada uns
+dos outros, e o motivo é poder testar cada um sozinho: o amostrador é testado
+contra uma distribuição cuja resposta é conhecida de antemão, sem cosmologia
+envolvida, e a cosmologia é testada contra casos em que a conta sai à mão, sem
+dados envolvidos. Quando o resultado final sai errado, isso diz em qual das
+caixas procurar o erro.
+
+O enunciado pede três módulos, e a leitura dos dados pode ficar dentro de
+\texttt{bayes} ou num quarto módulo próprio. Ela ficou num quarto módulo,
+\texttt{union21}, pelo mesmo motivo. No notebook, a Parte 3 (célula 3)
+é a única que abre os arquivos do catálogo, e a priori (célula 4) também depende
+dele, porque testa $E^2 > 0$ até o maior redshift da tabela. Colocar essas duas
+peças em \texttt{bayes} faria o amostrador depender dos arquivos de dados, e o
+teste da gaussiana, que não tem nada a ver com supernovas, passaria a precisar
+deles. O nome diz de onde vêm os dados: outra compilação de supernovas seria
+outro módulo com as mesmas duas funções, \texttt{log\_likelihood(theta, model)}
+e \texttt{log\_prior(theta)}, e \texttt{bayes} não precisaria mudar.
+
+\begin{escrever}[Para escrever --- nota própria]
+Dar um exemplo de erro no código que o teste da gaussiana (seção~\ref{sec:bayes})
+pegaria e o teste da cosmologia não pegaria, e um exemplo do contrário.
+\end{escrever}
+
+% --------------------------------------------------------------------------
+\subsection{\texttt{cosmology}}
+\label{sec:cosmo}
+
+Definimos, no primeiro módulo do código, as funções cosmológicas que usaremos na classe \texttt{FLRW}.
+
+Teoricamente, dada a métrica FLRW e as equações de Friedmann, o ritmo de expansão do universo é dado por
+\begin{equation}
+E^2(z)= \frac{H^2(z)}{H_0^2} = \Om(1+z)^3 + \Omega_r(1+z)^4 + \Ok(1+z)^2 + \OL,
+\end{equation}
+onde $\Omega_r$ é a densidade de radiação, que vamos desprezar, e $\Ok = 1 - \Om - \OL$ é a densidade de curvatura. A partir do ritmo de expansão, 
+podemos calcular a distância comóvel $\chi(z)$, que é o caminho percorrido pela luz desde a emissão até hoje, em unidades de $c/H_0$:
+
+
+$$
+\frac{1}{E(z)}=\frac{d\chi(z)}{dz}\to \int_0^z \frac{dz'}{E(z')}=\chi(z).
+$$
+
+A distância comóvel radial é então dada por
+
+$$
+r(z)=\frac{c}{H_0}\chi(z)=\frac{c}{H_0}\int_0^z \frac{dz'}{E(z')},
+$$
+
+e o $S_k$ (não sei como posso chamar) é uma função da distância comóvel radial e pode ser escrito, para uma curvatura $k$ arbitrária, como:
+
+\begin{equation}
+S_k(r)=\begin{cases}
+R_0 \sin (r/R_0)\ \ \ \ (k=+1)    \\
+r \ \ \ \ (k=0)    \\
+R_0 \sinh (r/R_0)\ \ \ \ (k=-1),
+\end{cases}
+\end{equation}
+
+com $R_0$ sendo o raio de curvatura do universo, e pode ser escrito como função de $\Omega_k$ quando olhamos para a parte de curvatura da equação de Friedmann:
+
+\begin{equation}
+1-\Omega_{tot}=-\frac{k c^2}{a^2 R_0^2 H^2}
+\end{equation}
+
+Avaliando a equação de curvatura hoje ($a_0 = 1$, $H = H_0$) e definindo
+
+$\Omega_k \equiv 1 - \Omega_{\rm tot,0}$:
+
+\begin{equation}
+\Omega_k = -\frac{k c^2}{R_0^2\, H_0^2}
+\quad\Longrightarrow\quad
+R_0 = \frac{c/H_0}{\sqrt{|\Omega_k|}} = \frac{D_H}{\sqrt{|\Omega_k|}},
+\end{equation}
+
+com $D_H \equiv c/H_0$. O sinal de $\Omega_k$ é oposto ao de $k$:
+
+$k=+1$ (fechado) $\Leftrightarrow \Omega_k < 0$, e $k=-1$ (aberto) $\Leftrightarrow \Omega_k > 0$.
+
+Como $r(z)=D_H\chi(z)$, o argumento que entra em $S_k$ pode ser escrito como
+
+$$
+\frac{r}{R_0}=\frac{D_H\chi}{R_0}
+=\sqrt{|\Omega_k|}\,\chi(z),
+$$
+
+e portanto:
+
+\begin{equation}
+S_k(r(z)) =
+\begin{cases}
+\dfrac{c}{H_0\sqrt{ \Omega_k}}\,\sinh\!\left(\sqrt{\Omega_k}\;\chi(z)\right), & \Omega_k > 0\\[10pt]
+\frac{c}{H_0}\,\chi(z), & \Omega_k = 0\\[10pt]
+\dfrac{c}{H_0 \sqrt{|\Omega_k|}}\,\sin\!\left(\sqrt{|\Omega_k|}\;\chi(z)\right), & \Omega_k < 0.
+\end{cases}
+\end{equation}
+
+e, por fim, podemos definir as distâncias de luminosidade e angular, respectivamente:
+\begin{equation}
+d_L=S_k (r=\chi\frac{c}{H_0})(1+z)
+\end{equation}
+e
+\begin{equation}
+d_A=S_k (r=\chi\frac{c}{H_0})/(1+z)
+\end{equation}
+
+Para escalas astronômicas, é comum usar o módulo de distância, que é uma escala logarítmica da distância de luminosidade:
+\begin{equation}
+  \mu= 5\log_{10}\left(\frac{d_L}{\rm Mpc}\right)+25,
+\end{equation}
+que é também o dado que temos na tabela do Union2.1.
+
+Além das distâncias, a classe calcula o tempo $t(z)$ e o elemento de de volume $dv/dz\,d\Omega$, que o enunciado também pede.
+
+Por sinal, usei o livro da barbara ryden como referencia nessa parte toda
+
+\paragraph{testes}
+
+Os testes pedidos para essa primeira parte são 
+\begin{itemize}
+  \item E(0)=1, checar se hoje $H=H_0$;
+  \item Lei de Hubble para z baixo, $D_L \to cz/H_0$ quando $z \to 0$;
+  \item $D_M = (c/H_0)\,\chi$ quando $\Ok = 0$;
+  \item Checar a relação entre as distâncias, $D_L = (1+z)^2 D_A$ para qualquer curvatura.
+\end{itemize}
+Todos esses testes são feitos na primeira célula (\texttt{\#testes1}) e todos passam 
+
+
+% --------------------------------------------------------------------------
+\subsection{\texttt{estatística}}
+\label{sec:bayes}
+
+Retomando um pouco do que foi discutido na introdução, como ferramenta para analisarmos os dados, vamos usar a abordagem bayesiana para probabilidade.
+
+Nessa abordagem, muda-se a interpretação de probabilidade que, usualmente, é entendida como o número de eventos dividido pelo número de tentativas.
+Essa interpretação é chamada de frequentista, e é a mais comum, contudo, ela depende de fenômenos que tenham caráter repetitivo, o que não
+é o caso para todos os eventos, existem certas perguntas que a abordagem frequentista não consegue responder, como por exemplo, 
+qual a probabilidade de ter chovido no dia 14 de setembro de 2026. A abordagem Bayesiana interpreta a probabilidade como o grau de confinça, logicamente deduzido
+dada a informação que se tem. Essa abordagem é a que vamos usar para estimar os parâmetros cosmológicos, dado o conjunto de dados do Union2.1.
+
+Dessa noção de probabilidade um dos primeiros resultados que podemos tirar, e o que vai estruturar tudo que faremos daqui para frente, é o teorema
+de Bayes, onde, no nosso contexto, ele pode ser escrito como
+\begin{equation}
+  p(\theta|d)=\frac{p(d|\theta)p(\theta)}{p(d)},
+\end{equation}
+onde $\theta$ é o conjunto de parâmetros, aqui $(\Om,\OL)$, e $d$ são os dados observados.
+
+Cada fator dessa relação tem um nome no linguajar bayesiano e eles são:
+\begin{itemize}
+  \item \textbf{posterior} $p(\theta|d)$: é a probabilidade de $\theta$ dado os dados, ou seja, é o que queremos estimar;
+  \item \textbf{sampling} $p(d|\theta)$: é a probabilidade de observar os dados dado o valor de $\theta$;
+  \item \textbf{priori} $p(\theta)$: é a probabilidade de $\theta$ antes de observar os dados;
+  \item \textbf{evidência} $p(d)$: é a probabilidade dos dados, independentemente do valor de $\theta$,
+\end{itemize}
+e considerando o sampling com dados fixos e função dos parâmetros temos a função de verossimilhança, ou likelihood
+\begin{equation}
+  \mathcal{L}(\theta) = p(d|\theta).
+\end{equation}
+
+Colocando o linguajar que definimos, o teorema de bayes é 
+\begin{equation}
+    \text{posteriori}=\frac{\text{likelihood}\times\text{priori}}{\text{evidência}}
+\end{equation}
+
+Para calcular a posteriori para os parâmtros que queremos ($\Om$, $\OL$), podemos fazer uma amostragem via MCMC. 
+Isso que dizer que, dado um ponto inicial, um par $(\Omega_{m_0}, \Omega_{\Lambda_0})$, sorteamos o próximo ponto de manera aletória, dependendo apenas do ponto atual,
+e aceitamos um ponto que melhora a posteriori, e aceitamos um ponto que piora a posteriori com uma probabilidade proporcional 
+à razão entre as duas posteriores. Formalmente, isso é o que o algorimto Metropolis-Hastings faz, e é o que vamos usar para amostrar a posteriori.
+Um ponto importante desse algoritmo que vale citar é que caso estejamos em um ponto e o próximo ponto sorteado seja recusado, o 
+ponto atual é anotado de novo, e isso faz com que as regiões com maior posteriori sejam visitadas mais vezes, além disso, também
+é importante que possam ser escolhidos pontos que pioram a posteriori, pois isso faz com que a cadeia explore a distribuição inteira,
+e não fique presa em um pico local de posteriori.
+
+No código, definimos 4 classes: \texttt{Posterior}, \texttt{Proposal}, \texttt{GaussianRandomWalk} e \texttt{MetropolisHastings}.
+De maneira geral, \texttt{Posterior} recebe a priori e a likelihood e, para um $\theta$, devolve o logaritmo da posterior. 
+Se $\theta$ estiver fora do intervalo permitido pela priori, ela devolve $-\infty$, que é o logaritmo de zero, ou seja, probabilidade zero. 
+A \texttt{Proposal} é uma lista de regras que o programa precisa seguir para sortear novos pontos, que são 
+sortear (\texttt{propose}) e dizer qual era a probabilidade de sortear um dado salto (\texttt{logpdf}).
+O \texttt{GaussianRandomWalk} é uma regra para sortear novos pontos, que é o ponto atual mais um ruído gaussiano. Como
+não podemos afirmar que a posteriori é simétrica, precisamos deformar o ruído no 
+formato da posteriori, e isso é feito via decomposição de Cholesky da matriz de covariância desejada,
+$\Sigma=L L^T$.
+Por fim, a classe \texttt{MetropolisHastings} é o laço da cadeia, que recebe o gerador de números aleatórios de fora, como argumento, para que a mesma semente (o número que inicializa o gerador) produza exatamente a mesma cadeia. Ele devolve as amostras, o log da posterior em cada uma, quais passos foram aceitos e a taxa de aceitação.
+
+
+Tudo é feito com logaritmos. A verossimilhança de 580
+pontos é o produto de 580 números pequenos, e um produto desses facilmente fica
+menor que o menor número que o computador representa,
+virando zero. Com logaritmos não temos esse problema, pois todos os termos se somam. 
+A regra de
+aceitação fica
+\begin{equation}
+\log u < \log\pi(\theta') - \log\pi(\theta)
++ \underbrace{\log q(\theta\,|\,\theta') - \log q(\theta'\,|\,\theta)}_{\text{correção de Hastings}},
+\end{equation}
+onde $u$ é um número aleatório uniforme entre 0 e 1, $\pi$ é a posterior, $\theta$ o ponto atual, $\theta'$ o candidato e
+$q(\theta'|\theta)$ a probabilidade de sortear $\theta'$ estando em $\theta$. A
+correção de Hastings compensa regras de sorteio que preferem uma direção.
+Para o passeio gaussiano, ir de $\theta$ a $\theta'$ é tão provável quanto
+voltar, os dois termos se cancelam e a correção vale zero. O código calcula a
+correção mesmo assim, via \texttt{logpdf}, para poder trocar de regra de sorteio
+depois sem mexer no laço.
+
+O tamanho do passo decide a eficiência. Passos pequenos demais são quase sempre
+aceitos, mas a cadeia anda devagar e cada amostra repete quase a anterior.
+Passos grandes demais caem fora da região provável e são quase sempre
+recusados. Uma receita clássica para começar, válida para alvos parecidos com
+gaussianas, é usar como covariância da proposta a covariância da posterior
+multiplicada por $2{,}38^2/d$, onde $d$ é o número de parâmetros. A taxa de
+aceitação é só um sintoma, e o que realmente mede a eficiência são os
+diagnósticos da seção~\ref{sec:diag}.
+
+\paragraph{testes} Os testes pedidos para essa segunda parte são
+\begin{itemize}
+  \item Usar o algoritmo para recuperar uma gaussiana, dados os desvios
+  \item Teste de reproduzibilidade, rodar duas vezes a mesma cadeia com a mesma semente e ver se os resultados batem
+  \item Testar se um estado rejeitado é repetido
+\end{itemize}
+
+Todos esses testes são feitos na segunda célula (\texttt{\#testes2}) e todos passam.
+
+% --------------------------------------------------------------------------
+\subsection{\texttt{análise do Union2.1}}
+\label{sec:like}
+
+Definimos, para cada supernova, o resíduo, como sendo, a diferença entre o $\mu$ (módulo de distância) observado e 
+o $\mu$ previsto. Se os erros fossem independentes, o $\chi^2$ seria apenas a soma de
+cada $\chi^2$ para cada supernova. Como a matriz de covariância não é diagonal, os erros das supernovas
+não são independentes, precisamos tratar isso de maneira diferente.
+
+Nesse caso o $\chi^2$ é dado por
+\begin{equation}
+  \chi^2=(\mu_{\rm obs}-\mu_{\rm th})^T C^{-1}(\mu_{\rm obs}-\mu_{\rm th}),
+\end{equation}
+onde $C$ é a matriz de covariância. E a maneira de fazemos isso que exige menos numericamente (não sei o por quê exatamente)
+é fatorar a matriz de covariância via Cholesky, $C=LL^T$, onde $L$ é uma matriz
+triangular inferior e resolver o sistema $Ly = (\mu_{\rm obs}-\mu_{\rm th})$ e $\chi^2=y^Ty$.
+
+Fazendo isso no código, começamos na célula 3 do notebook, lendo os dados 
+e checando tamanho, simetria, etc. Só então fatora a covariância:
+\begin{lstlisting}
+L_sys = np.linalg.cholesky(cov_sys)           
+
+uns = np.ones(N_SN)
+w = solve_triangular(L_sys, uns, lower=True)   # resolve L_sys @ w = 1
+C1 = w @ w
+\end{lstlisting}
+Como $C$ não depende de $\Om$ nem de
+$\OL$, basta fazê-la uma vez para todos os pontos da cadeia. As duas últimas linhas preparam dois ingredientes
+da marginalização de $\M$ que também não dependem dos parâmetros, $w$, a solução
+de $Lw = \mathbf{1}$ com $\mathbf{1}$ o vetor de 580 uns, e $C_1 = w^Tw$
+(seção~\ref{sec:M}).
+
+A cada ponto que a cadeia visita, entram duas funções:
+\begin{lstlisting}
+def chi2_marg(mu_teoria):
+    delta = mu_obs - mu_teoria
+    y = solve_triangular(L_sys, delta, lower=True)   # resolve L_sys @ y = delta
+    A = y @ y
+    B = y @ w
+    return A - B**2 / C1
+
+def log_likelihood(theta, model):
+    omega_m, omega_lambda = theta
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cosmo = model(H0=70, omega_m=omega_m, omega_lambda=omega_lambda)
+        mu_teoria = cosmo.mu(z_sn)
+    if not np.all(np.isfinite(mu_teoria)):
+        return -np.inf
+    return -0.5 * chi2_marg(mu_teoria)
+\end{lstlisting}
+
+A primeira, \texttt{chi2\_marg}, recebe os $\mu$ teóricos das 580 supernovas,
+forma o resíduo \texttt{delta} e resolve $Ly = \Delta$ com a função
+\texttt{solve\_triangular} do scipy. O argumento \texttt{lower=True} avisa que
+$L$ é triangular inferior. Resolver $Ly = \Delta$ dá o
+mesmo $\chi^2$ da equação acima porque
+$C^{-1} = (LL^T)^{-1} = (L^{-1})^T L^{-1}$, e então
+$\Delta^T C^{-1} \Delta = (L^{-1}\Delta)^T (L^{-1}\Delta) = y^Ty$, sem que
+$C^{-1}$ precise ser calculada em momento nenhum. Esse $y^Ty$ é o \texttt{A} da
+função, e o que ela devolve, $A - B^2/C_1$, é o mesmo $\chi^2$ já com $\M$
+integrado, como explicado na seção~\ref{sec:M}.
+
+A segunda, \texttt{log\_likelihood}, tem a assinatura que a classe
+\texttt{Posterior} espera, recebe o ponto \texttt{theta} e a classe cosmológica
+\texttt{model}, que na prática é a \texttt{FLRW}. Ela seta um universo com
+$H_0 = 70$, e
+calcula $\mu$ para as 580 supernovas. O \texttt{np.errstate} só silencia os avisos que o numpy dá quando alguma
+conta vira \texttt{nan}. Se algum $\mu$ não é um número finito, que é o caso da
+luz que passou do ponto oposto de um universo fechado, a função devolve
+$-\infty$, o logaritmo de zero, e o ponto é recusado. No caso normal ela devolve
+$-\chi^2/2$, porque a verossimilhança gaussiana é proporcional a
+$e^{-\chi^2/2}$ e a cadeia trabalha com logaritmos.
+
+
+
+Um último ponto para se consederar é que, para algumas combinações de $(\Om,\OL)$, com muita energia escura e pouca
+matéria, $E^2(z)$ fica negativo antes de chegar ao maior redshift do catálogo
+($z = 1{,}414$). Nesses universos, voltando no tempo, a expansão para e se
+inverte antes de chegar a esse $z$, e não houve Big Bang. Uma supernova com
+aquele redshift simplesmente não poderia existir, então o ponto é impossível,
+e o código tem que recusá-lo de propósito na priori. Deixar a raiz quadrada de
+um número negativo virar \texttt{nan} e ser recusada por acidente funciona, mas
+esconde a decisão. Um exemplo: $(\Om,\OL) = (0{,}1;\,2{,}0)$ tem $E^2 < 0$ dentro
+da faixa do catálogo.
+
+
+\paragraph{Como sabemos que funciona.} As dimensões dos dados e da covariância
+têm que bater (580 e $580\times580$), a matriz tem que ser simétrica e a
+fatoração de Cholesky tem que funcionar, o que só acontece com uma covariância
+válida. O $\chi^2$ calculado com Cholesky tem que coincidir com o calculado com
+a inversa num caso pequeno de teste, e o melhor ajuste tem que reproduzir a
+resposta de referência da primeira página.
+
+\begin{escrever}[Para escrever --- nota própria]
+Com suas palavras: o que representa um número fora da diagonal de $C$? Por que
+os pontos com $E^2<0$ são excluídos de vez, em vez de só receberem uma nota
+baixa?
+\end{escrever}
+
+% --------------------------------------------------------------------------
+\subsection{\texorpdfstring{O número que atrapalha, $\M$: o desafio do enunciado}{O número que atrapalha, M: o desafio do enunciado}}
+\label{sec:M}
+
+\paragraph{A ideia.} Imagine um salão cheio de lâmpadas idênticas cuja potência
+ninguém conhece. Dá para dizer que uma está duas vezes mais longe que a outra,
+comparando os brilhos, mas não dá para dizer a distância em metros. As
+supernovas estão na mesma situação: elas medem bem a \emph{forma} da curva de
+distância contra $z$, isto é, como as distâncias se comparam entre si, e mal a
+escala absoluta. O $H_0$ tem o mesmo efeito, porque todas as distâncias são
+proporcionais a $c/H_0$, e na escala logarítmica de $\mu$ multiplicar todas as
+distâncias por um número vira somar uma constante a todos os $\mu$. As duas
+incertezas se juntam num único parâmetro $\M$:
+\begin{equation}
+\mu_{\rm th}(z) = \mu_{\rm forma}(z;\Om,\OL) + \M ,
+\end{equation}
+onde $\mu_{\rm forma}$ é calculado com qualquer $H_0$ fixo, por exemplo 70, já
+que a escolha é absorvida por $\M$. Um parâmetro que precisa estar no modelo
+mas cujo valor não interessa se chama \emph{parâmetro de incômodo}
+(\emph{nuisance parameter}). Fixar $\M$ num valor escolhido sem cuidado
+desloca os contornos de $(\Om,\OL)$, porque a curva teria que se entortar para
+compensar o deslocamento errado.
+
+\paragraph{As três saídas.} O enunciado pede para escolher e justificar uma
+delas.
+\begin{itemize}[leftmargin=*]
+\item \textbf{Amostrar}: tratar $\M$ como um terceiro parâmetro da cadeia e, no
+fim, simplesmente ignorar a coluna dele ao fazer o histograma de $(\Om,\OL)$.
+Ignorar a coluna equivale a \emph{marginalizar}, que quer dizer somar a
+probabilidade sobre todos os valores possíveis de $\M$.
+\item \textbf{Otimizar}: para cada $(\Om,\OL)$, usar o $\M$ que dá o menor
+$\chi^2$.
+\item \textbf{Integrar analiticamente}: fazer a soma sobre todos os $\M$ com
+papel e lápis, antes de rodar qualquer coisa, e ficar com uma verossimilhança
+que só depende de $(\Om,\OL)$.
+\end{itemize}
+
+\paragraph{Decisão adotada.} Integrar analiticamente, com priori constante em
+$\M$ sobre a reta inteira. No notebook, isso é a função \texttt{chi2\_marg} da
+célula 3, e a verossimilhança que a cadeia usa é $-\chi^2_{\rm marg}/2$. A
+escolha tem três vantagens. A cadeia fica com dois parâmetros para explorar em
+vez de três. A soma sobre $\M$ é feita de forma exata, sem o erro estatístico
+que viria de estimá-la com amostras. E, como mostram as contas abaixo, neste
+problema integrar e otimizar dão a mesma posterior, o que foi conferido também
+numericamente na célula 3: em $(\Om,\OL) = (0{,}29;\,0{,}68)$, varrendo $\M$ de
+$-0{,}2$ a $0{,}2$ em passos de 0,001, o menor $\chi^2$ encontrado é 545,1284 em
+$\M = 0{,}014$, e a fórmula fechada dá 545,1280 em $\M = B/C_1 = 0{,}0136$. A
+pequena diferença vem do passo da varredura. A mesma célula testa a propriedade
+que justifica tudo isso, que é $\M$ absorver a escala: somar 0,5 a todos os
+$\mu$ teóricos, ou calcular $\mu_{\rm forma}$ com $H_0 = 50$ em vez de 70, não
+muda $\chi^2_{\rm marg}$.
+
+\paragraph{As contas da integração analítica.} Ela é possível porque $\M$ entra
+somando, e isso faz o $\chi^2$ ser uma parábola em $\M$. Chamando
+$\Delta = \mu_{\rm obs} - \mu_{\rm forma}$ e $\mathbf{1}$ o vetor de 580 uns,
+\begin{equation}
+\chi^2(\M) = (\Delta - \M\mathbf{1})^T C^{-1} (\Delta - \M\mathbf{1})
+= A - 2\M B + \M^2 C_1 ,
+\end{equation}
+com
+\begin{equation}
+A = \Delta^T C^{-1}\Delta, \qquad
+B = \Delta^T C^{-1}\mathbf{1}, \qquad
+C_1 = \mathbf{1}^T C^{-1}\mathbf{1} .
+\end{equation}
+Completando o quadrado, $\chi^2(\M) = C_1(\M - B/C_1)^2 + A - B^2/C_1$. A
+integral de $e^{-\chi^2/2}$ em $\M$, com priori constante em $\M$, é uma
+integral gaussiana: o termo com $\M$ integra num fator $\sqrt{2\pi/C_1}$ que não
+depende de $(\Om,\OL)$, e sobra
+\begin{equation}
+\boxed{\;\chi^2_{\rm marg} = A - \frac{B^2}{C_1}\;}
+\end{equation}
+Um detalhe que ajuda a entender: o mínimo da parábola está em $\M = B/C_1$, e o
+valor do $\chi^2$ nesse mínimo é exatamente $A - B^2/C_1$. Neste problema,
+portanto, integrar e otimizar dão a mesma posterior para $(\Om,\OL)$. Isso só
+acontece porque $\M$ entra de forma linear e $C_1$ não depende da cosmologia.
+
+\paragraph{No código.} Os três números saem de dois sistemas triangulares,
+sem nunca formar $C^{-1}$. Resolvendo $Ly = \Delta$ e $Lw = \mathbf{1}$, vale
+$A = y^Ty$, $B = y^Tw$ e $C_1 = w^Tw$. Como $\mathbf{1}$ não depende dos
+parâmetros, $w$ e $C_1$ são calculados uma vez só, antes da cadeia.
+
+\paragraph{A priori escondida em cada escolha.} A integração analítica acima
+supõe priori constante em $\M$ sobre todos os números reais. Essa priori é
+\emph{imprópria}, ou seja, não soma 1 (a área sob uma constante na reta inteira
+é infinita), mas a conta final é finita porque a verossimilhança cai muito
+rápido longe do melhor $\M$. Amostrar $\M$ na cadeia exige um intervalo finito,
+que precisa ser largo o bastante para não cortar a região onde a verossimilhança
+é relevante. Isso foi conferido no fim do \texttt{analise.ipynb}: quatro
+cadeias de 50\,000 passos que amostram $\M$ com priori constante em $[-1, 1]$ e
+usam o $\chi^2$ completo dão $\Om = 0{,}280 \pm 0{,}112$,
+$\OL = 0{,}660 \pm 0{,}209$ e $\M = 0{,}015 \pm 0{,}033$, e 68,3\% e 95,0\%
+dessas amostras caem dentro dos contornos de 68\% e 95\% da grade que usa $\M$
+integrado. O intervalo $[-1, 1]$ vai a cerca de 30 desvios padrão de $\M$ para
+cada lado, então não corta nada.
+
+\begin{escrever}[Para escrever --- esta é a parte avaliada, vale caprichar]
+Refazer a conta do completamento de quadrado à mão. Explicar qual priori em
+$\M$ cada uma das três saídas assume, por que uma priori imprópria é aceitável
+aqui, e mostrar que amostrar $\M$ como terceiro parâmetro dá a mesma posterior
+em $(\Om,\OL)$. Referência indicada no enunciado: Amanullah et al.\ (2010),
+Apêndice C.
+\end{escrever}
+
+% --------------------------------------------------------------------------
+\subsection{\texttt{diagnostics}: por que a cadeia rodar não basta}
+\label{sec:diag}
+
+\paragraph{A ideia.} Uma cadeia que terminou sem erro ainda pode estar errada
+de duas formas. Ela pode não ter \emph{convergido}: o começo dela ainda reflete
+o ponto de partida, ou ela não teve tempo de visitar a distribuição inteira. E
+ela pode ter convergido mas ser curta demais para a precisão desejada, porque
+cada amostra fica perto da anterior e muitas amostras seguidas carregam quase a
+mesma informação. Os diagnósticos respondem a essas duas perguntas, e nenhum
+deles sozinho prova que está tudo certo.
+
+\paragraph{Aquecimento.} As primeiras amostras de uma cadeia refletem o ponto
+de partida, e são descartadas. Esse trecho se chama \emph{aquecimento}
+(\emph{warm-up} ou \emph{burn-in}). É nele que se ajusta a covariância da
+proposta, que depois fica congelada durante as amostras que valem. O tamanho do
+trecho descartado deve ser escolhido olhando os traços, e não por hábito.
+
+\paragraph{Os diagnósticos, um por um.}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Traço e taxa de aceitação.} O traço é o gráfico do valor do
+parâmetro contra o número do passo. Uma cadeia saudável parece um ruído
+estacionário em volta de um valor, sem tendência e sem trechos parados. É o
+primeiro filtro, visual.
+
+\item \textbf{Autocorrelação e tamanho efetivo da amostra (ESS).} A
+autocorrelação $\rho_\ell$ mede o quanto uma amostra se parece com a que veio
+$\ell$ passos antes. Somando essas correlações obtém-se o tempo de
+autocorrelação $\tau_{\rm int}$, que é quantos passos a cadeia leva para
+esquecer onde estava:
+\begin{equation}
+\tau_{\rm int} = 1 + 2\sum_{\ell\ge1}\rho_\ell , \qquad
+N_{\rm eff} \approx \frac{N}{\tau_{\rm int}} .
+\end{equation}
+$N_{\rm eff}$ é o número de amostras independentes que a cadeia de $N$ passos
+vale. Na prática a soma é cortada num $\ell$ máximo, porque as correlações
+estimadas para $\ell$ grandes são só ruído. Com ele sai o \textbf{MCSE}, o erro
+na média causado por a cadeia ser finita, $\text{MCSE} \approx s/\sqrt{N_{\rm eff}}$,
+onde $s$ é o desvio padrão das amostras. O MCSE é diferente da largura da
+posterior: a largura diz quanto os dados deixam $\Om$ incerto, e o MCSE diz
+quanto a cadeia ainda erra ao estimar a média.
+
+\item \textbf{Split-$\hat R$.} Rodam-se várias cadeias começando de pontos
+espalhados, e cada uma é cortada ao meio. Se todas convergiram, a dispersão
+dentro de cada pedaço é igual à dispersão de todos juntos, e a razão
+$\hat R \approx \sqrt{\hat V/W}$ entre as duas fica perto de 1 ($\hat V$ é a
+variância de tudo junto e $W$ a média das variâncias de cada pedaço). Se uma
+cadeia ficou presa numa região diferente das outras, ou se a primeira metade
+difere da segunda, $\hat R$ fica maior que 1. O enunciado sugere
+$\hat R < 1{,}01$ como referência.
+
+\item \textbf{Espectro de Dunkley.} A cadeia é tratada como um sinal no tempo e
+decomposta em oscilações lentas e rápidas (transformada de Fourier). As
+amostras de uma cadeia que mistura bem, vistas em escalas de tempo longas,
+parecem ruído branco, com a mesma potência em todas as frequências baixas, e
+isso aparece como um platô no espectro. Dunkley et al.\ (2005) ajustam
+\begin{equation}
+P(k) = \frac{P_0}{1 + (k/k_\star)^\alpha}, \qquad
+j_\star = \frac{k_\star N}{2\pi}, \qquad
+r = \frac{P_0}{N s^2},
+\end{equation}
+onde $P_0$ é a altura do platô, $j_\star$ diz onde o platô termina (contado em
+modos de Fourier) e $\alpha$ é a inclinação depois dele. O critério do artigo
+exige $j_\star > 20$, para que o platô esteja bem resolvido, e $r < 0{,}01$, o
+que significa que o erro na média é menor que 10\% do desvio padrão da
+posterior. O teste é aplicado a cada parâmetro, com a cadeia inteira, sem
+desbastar (jogar fora uma amostra a cada tantas). A limitação dele é que uma
+cadeia presa numa região só pode parecer ruído branco e passar, e por isso ele
+é usado junto com várias cadeias espalhadas.
+\end{itemize}
+
+\begin{escrever}[Para escrever --- nota própria]
+O que cada diagnóstico detecta que os outros não detectam? Descrever uma
+situação em que o espectro de Dunkley passa e a cadeia ainda está errada, e
+qual dos outros diagnósticos pegaria o problema.
+\end{escrever}
+
+% ==========================================================================
+\section{Detalhes das decisões e dos resultados}
+
+O README resume as hipóteses e os resultados. Aqui ficam as justificativas completas e os números por cadeia.
+
+\subsection{Comparação com a grade}
+
+Antes de escrever a cadeia, a mesma conta
+foi feita de um jeito mais simples e mais lento, avaliando a probabilidade numa
+grade de valores de $(\Om,\OL)$. O melhor ajuste foi $\Om \approx 0{,}29$ e
+$\OL \approx 0{,}68$, com $\chi^2 \approx 545$. Esse $\chi^2$ mede a soma dos
+desvios entre teoria e dados, cada um dividido pelo seu erro, e quando o modelo
+descreve bem os dados ele fica perto do número de graus de liberdade, que aqui
+é $580 - 3 = 577$ (580 supernovas menos os três números ajustados, $\Om$, $\OL$
+e $\M$). A razão $545/577 \approx 0{,}94$ diz que o modelo passa pelos pontos
+tão bem quanto o tamanho dos erros permite. A cadeia reproduz esse resultado:
+as médias e os desvios que ela dá e os calculados direto na grade diferem em
+menos de 0,002 (célula 8 do notebook). A média da cadeia fica um pouco abaixo do
+ponto de melhor ajuste porque a posterior não é uma gaussiana simétrica, e os
+dois números só coincidiriam se fosse. Um sinal disso é que o contorno de 95\%
+encosta na parede $\Om = 0$ da priori.
+
+\subsection{Decisões e hipóteses}
+\label{sec:decisoes}
+
+Uma \emph{hipótese} aqui é
+qualquer escolha que muda o resultado e que outra pessoa poderia ter feito
+diferente, e cada linha precisa da justificativa, não só da escolha.
+
+{\small
+\begin{xltabular}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.6cm}
+  >{\raggedright\arraybackslash}p{3.2cm} X@{}}
+\toprule
+\textbf{decisão} & \textbf{escolha} & \textbf{por quê} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{decisão} & \textbf{escolha} & \textbf{por quê} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+priori em $(\Om,\OL)$ & $0\le\Om\le2$, $-1\le\OL\le3$ &
+constante dentro do intervalo, sugerida no enunciado; é própria (soma 1) e larga
+o bastante para não cortar a região que os dados permitem \\[3pt]
+curvatura & livre & o enunciado pede para não supor universo plano \\[3pt]
+covariância & com sistemáticas & exigido para o resultado final \\[3pt]
+tratamento de $\M$ & integrado analiticamente, priori constante em $\M$ &
+deixa a verossimilhança exata e só com $(\Om,\OL)$; neste problema dá o mesmo
+que otimizar $\M$, e amostrar $\M$ deve dar o mesmo com um intervalo largo
+(seção~\ref{sec:M}) \\[3pt]
+$H_0$ usado em $\mu_{\rm forma}$ & 70 km/s/Mpc &
+o valor não importa, porque é absorvido por $\M$; a célula 3 confere que
+$H_0 = 50$ dá o mesmo $\chi^2_{\rm marg}$ \\[3pt]
+pontos com $E^2\le0$ antes de $z = 1{,}414$ & recusados na priori &
+nesses universos a expansão se inverte antes do redshift da supernova mais
+distante, que então não poderia existir. É uma afirmação sobre o que é
+fisicamente possível, que usa só os redshifts do catálogo e não os $\mu$
+medidos, por isso fica na priori. São 14,1\% da caixa (célula 4), e os pontos válidos na
+borda dessa região têm $\Delta\chi^2 > 200$ em relação ao melhor ajuste, então a
+exclusão não mexe nos contornos \\[3pt]
+pontos com $D_M < 0$ para alguma supernova & recusados na verossimilhança &
+universo fechado em que a luz da supernova passou do ponto oposto do espaço
+(o seno em $S_k$ fica negativo). O universo existe ($E^2 > 0$), mas $\mu$
+vira \texttt{nan}, e \texttt{log\_likelihood} testa isso explicitamente e devolve
+$-\infty$. São 1,6\% da caixa, também com $\Delta\chi^2 > 200$ na borda \\[3pt]
+grade em $z$ para $\chi$ & $N=1000$ pontos até $z_{\max}=2$ &
+a integral de $1/E$ é feita uma vez numa grade e interpolada com
+\texttt{np.interp}. Trocar $N = 1000$ por $20\,000$ muda $\mu$ em no máximo
+$1{,}8\times10^{-4}$ mag em 300 cosmologias sorteadas na priori (e em
+$3\times10^{-5}$ mag no melhor ajuste), contra o menor erro do catálogo,
+$\sigma_\mu = 0{,}084$ mag (checagem no fim do \texttt{analise.ipynb}). Como
+\texttt{np.interp} repetiria o último valor da grade sem avisar, pedir
+distância acima de $z_{\max}$ dá \texttt{ValueError}; o catálogo vai até
+$z = 1{,}414$ \\[3pt]
+covariância da proposta & $2{,}38^2/2$ vezes a covariância medida no aquecimento
+& a regra de Gelman, Roberts e Gilks para 2 parâmetros, aplicada em duas
+rodadas de 5000 passos (detalhes abaixo); o resultado segue a inclinação da
+posterior e dá taxa de aceitação de 0,36 \\[3pt]
+aquecimento descartado & 1000 passos por cadeia &
+as cadeias chegam à região típica entre os passos 11 e 44; cortar 1000 sobra
+com folga e custa 2\% de cada cadeia (detalhes abaixo) \\[3pt]
+número de cadeias e pontos iniciais & 4 cadeias de 50\,000 passos, inícios
+sorteados na priori & inícios espalhados são o que dá sentido ao
+split-$\hat{R}$; o comprimento dá ESS $\approx 27\,000$ por parâmetro
+(detalhes abaixo) \\
+\end{xltabular}
+}
+
+\paragraph{Covariância da proposta.} A proposta começa com passos de 0,05 nas
+duas direções e sem inclinação, a partir de $(\Om,\OL) = (0{,}3;\,0{,}7)$. Roda-se
+uma cadeia de 5000 passos, mede-se a covariância das amostras da metade final e
+multiplica-se por $2{,}38^2/2$. Isso é repetido uma segunda vez partindo do
+último ponto da primeira (célula 5). A taxa de aceitação passa de 0,71 na
+primeira rodada, sinal de passos pequenos demais, para 0,35 na segunda. A
+proposta final tem passos de 0,19 em $\Om$ e 0,36 em $\OL$ com correlação 0,86,
+parecida com a correlação 0,84 da própria posterior, ou seja, os passos saem
+alongados na direção em que a posterior é comprida. Depois disso a proposta
+fica congelada nas cadeias que valem. Se ela continuasse sendo ajustada com base
+na história da própria cadeia, o sorteio do próximo ponto deixaria de depender
+só do ponto atual, e a garantia de que a cadeia visita a posterior na proporção
+certa, que vale para o Metropolis--Hastings comum, deixaria de valer.
+
+\paragraph{Aquecimento.} As quatro cadeias partem de pontos longe do pico e,
+usando como critério o log da posterior ficar a menos de 5 do máximo encontrado,
+chegam à região típica nos passos 21, 26, 44 e 11 (célula 7). Cortar os 1000
+primeiros passos é mais de vinte vezes o pior desses valores. O split-$\hat R$
+confirma que o começo é diferente do resto: calculado só com os 300 primeiros
+passos ele vale 1,052 em $\Om$ e 1,031 em $\OL$, e depois do corte cai para
+1,0002 nos dois.
+
+\paragraph{Número de cadeias e pontos iniciais.} Os pontos de partida são
+sorteados com probabilidade uniforme na caixa da priori, descartando os que têm
+posterior nula, e saíram $(0{,}99;\,0{,}70)$, $(1{,}26;\,0{,}43)$,
+$(0{,}92;\,-0{,}76)$ e $(1{,}57;\,2{,}67)$. Espalhar os inícios é o que permite
+ao split-$\hat R$ acusar uma cadeia presa numa região diferente das outras,
+porque cadeias que partem todas do mesmo lugar podem concordar entre si e estar
+todas erradas. Com tempo de autocorrelação $\tau \approx 7$, as quatro cadeias
+de 50\,000 passos valem cerca de 27\,000 amostras independentes por parâmetro,
+o que deixa o erro de Monte Carlo na média em 0,0007 para $\Om$ e 0,0013 para
+$\OL$, e o conjunto roda em cerca de 3,5 minutos.
+
+\subsection{Resultados}
+
+\paragraph{O que os números dizem.} A correlação entre $\Om$ e $\OL$ na
+posterior é 0,84, e ela aparece no gráfico como uma elipse comprida inclinada
+para cima: os dados aceitam trocar um pouco mais de matéria por um pouco mais de
+energia escura. Ao longo dessa direção comprida a soma $\Om + \OL$ muda
+bastante, e é por isso que $\Ok$, que depende só dessa soma, sai com o maior
+desvio dos três. Supernovas sozinhas, portanto, dizem pouco sobre a curvatura, e
+o resultado é compatível com um universo plano: a reta $\Ok = 0$ atravessa o
+contorno de 68\% e passa perto do melhor ajuste. O que elas dizem com clareza é
+outra coisa. O parâmetro de desaceleração $q_0$ mede se a expansão está freando
+($q_0 > 0$, o que a gravidade da matéria faria sozinha) ou acelerando
+($q_0 < 0$) hoje, e 99,86\% das amostras têm $q_0 < 0$. Da mesma forma, 99,91\%
+das amostras têm $\OL > 0$. Com as supernovas do Union2.1 e sem supor
+planitude, a expansão está acelerando e isso pede alguma forma de energia
+escura.
+
+\paragraph{Convergência.} As taxas de aceitação das quatro cadeias ficaram entre
+0,361 e 0,364. A tabela abaixo mostra, por cadeia, o tempo de autocorrelação
+$\tau$ (célula 10) e o ajuste do espectro de Dunkley (célula 11).
+
+\begin{center}
+\small
+\begin{tabular}{@{}c cccc cccc@{}}
+\toprule
+& \multicolumn{4}{c}{$\Om$} & \multicolumn{4}{c}{$\OL$} \\
+\cmidrule(lr){2-5}\cmidrule(l){6-9}
+\textbf{cadeia} & $\tau$ & $j_\star$ & $\alpha$ & $r$ & $\tau$ & $j_\star$ & $\alpha$ & $r$ \\
+\midrule
+0 & 7,8 & 1574 & 1,63 & $1{,}8\times10^{-4}$ & 7,5 & 1451 & 1,57 & $1{,}9\times10^{-4}$ \\
+1 & 6,9 & 1507 & 1,57 & $1{,}8\times10^{-4}$ & 6,9 & 1401 & 1,57 & $1{,}9\times10^{-4}$ \\
+2 & 7,0 & 1484 & 1,55 & $1{,}8\times10^{-4}$ & 7,2 & 1441 & 1,57 & $1{,}9\times10^{-4}$ \\
+3 & 7,2 & 1969 & 1,76 & $1{,}5\times10^{-4}$ & 7,4 & 1407 & 1,56 & $1{,}9\times10^{-4}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+As oito combinações de cadeia e parâmetro passam no critério de Dunkley com
+muita folga: $j_\star$ fica entre 1400 e 2000, contra o mínimo de 20, e $r$ fica
+perto de $2\times10^{-4}$, contra o máximo de 0,01. O split-$\hat R$ de 1,0002
+fica abaixo da referência de 1,01 do enunciado, e as médias de cada cadeia
+separada diferem entre si em no máximo 0,002 em $\Om$ e 0,005 em $\OL$
+(célula 7). Os testes com
+resposta conhecida dão confiança de que os diagnósticos medem o que dizem medir:
+para uma série AR(1) com $\phi = 0{,}9$, cujo $\tau$ exato é 19, a função
+\texttt{tempo\_autocorrelacao} dá 19,4, e o split-$\hat R$ sobe para 1,10 quando
+uma de quatro cadeias é deslocada de propósito.
+
+% ==========================================================================
+\section{Caderno de bordo: o que eu aprendi}
+
+Seção pessoal, fora do que o enunciado pede. Escrever em primeira pessoa,
+inclusive os erros, porque é isso que vai ser útil daqui a seis meses.
+
+\begin{escrever}[Caderno de bordo]
+\begin{itemize}[leftmargin=*,nosep]
+\item \textbf{Cosmologia que eu não sabia antes:}
+\item \textbf{Probabilidade e estatística que eu não sabia antes:}
+\item \textbf{Coisas de Python e numpy que apareceram:}
+\item \textbf{Erros que eu cometi e como percebi:}
+\item \textbf{O que ainda está obscuro para mim:}
+\end{itemize}
+\end{escrever}
+
+% ==========================================================================
+\appendix
+\section{Glossário}
+
+\begin{description}[leftmargin=1.5em,style=nextline]
+\item[Redshift ($z$)] Quanto os comprimentos de onda da luz foram esticados
+pela expansão durante a viagem. O universo era $1+z$ vezes menor quando a luz
+saiu.
+\item[Vela-padrão] Objeto cujo brilho verdadeiro é conhecido, de modo que o
+brilho aparente dá a distância.
+\item[$H_0$, $H(z)$, $E(z)$] Ritmo de expansão hoje, na época de redshift $z$,
+e a razão entre os dois.
+\item[$\Om$, $\OL$, $\Ok$] Frações de matéria, de energia escura e de curvatura,
+medidas hoje; somam 1.
+\item[Distância comóvel ($\chi$)] Comprimento do caminho da luz medido com a
+régua de hoje.
+\item[$D_L$, $D_A$] Distâncias que reproduzem o brilho aparente e o tamanho
+aparente de um objeto, respectivamente.
+\item[Módulo de distância ($\mu$)] $D_L$ em escala logarítmica; 5 unidades a
+mais equivalem a 10 vezes mais longe.
+\item[Priori, verossimilhança, posterior] O que se aceita antes dos dados; quão
+provável seria observar os dados dado o parâmetro; o que se aceita depois.
+\item[Covariância] Matriz que diz o tamanho de cada erro (diagonal) e o quanto
+os erros andam juntos (fora da diagonal).
+\item[Cholesky] Escrever uma matriz de covariância como $LL^T$ com $L$
+triangular; o análogo matricial da raiz quadrada.
+\item[MCMC, cadeia] Passeio aleatório cujas posições visitadas se distribuem
+como a posterior.
+\item[Proposta] A regra que sorteia o próximo candidato da cadeia.
+\item[Taxa de aceitação] Fração dos candidatos aceitos.
+\item[Aquecimento (\emph{burn-in})] Começo da cadeia, descartado porque ainda
+lembra o ponto de partida.
+\item[Parâmetro de incômodo] Parâmetro necessário no modelo mas cujo valor não
+interessa, como $\M$.
+\item[Marginalizar] Somar a probabilidade sobre todos os valores de um
+parâmetro para eliminá-lo; numa cadeia, é ignorar a coluna dele.
+\item[Priori imprópria] Priori que não soma 1, como uma constante na reta
+inteira.
+\item[ESS ($N_{\rm eff}$)] Número de amostras independentes que uma cadeia
+correlacionada vale.
+\item[MCSE] Erro na média causado pelo tamanho finito da cadeia.
+\item[Split-$\hat R$] Compara a dispersão dentro e entre pedaços de cadeias;
+perto de 1 indica convergência.
+\item[Semente] Número que inicializa o gerador aleatório; a mesma semente
+reproduz a mesma sequência.
+\end{description}
+
+% ==========================================================================
+\section*{Referências}
+\addcontentsline{toc}{section}{Referências}
+
+\begin{itemize}[leftmargin=*]
+\item B. Ryden, \emph{Introduction to Cosmology} --- expansão, distâncias e
+geometria FLRW.
+\item N. Suzuki et al.\ (2012), \href{https://arxiv.org/abs/1105.3470}{arXiv:1105.3470}
+--- o catálogo Union2.1.
+\item R. Amanullah et al.\ (2010), \href{https://arxiv.org/abs/1004.1711}{arXiv:1004.1711},
+Apêndice C --- parâmetros de incômodo lineares, indicado no enunciado para o
+tratamento de $\M$.
+\item L. Amendola e S. Tsujikawa, \emph{Dark Energy} --- marginalização
+analítica, indicado no enunciado.
+\item J. Dunkley et al.\ (2005), \href{https://arxiv.org/abs/astro-ph/0405462}{astro-ph/0405462}
+--- diagnóstico de convergência pelo espectro de potência.
+\item A. Gelman, G. Roberts e W. Gilks (1996), \emph{Efficient Metropolis jumping
+rules} --- o fator $2{,}38^2/d$ da proposta.
+\item Slides da disciplina, \texttt{mcmc\_sampling}.
+\end{itemize}
+
+\end{document}
