@@ -81,4 +81,3 @@ class MetropolisHastings:
             logps[i]    = logp
 
         return amostras, logps, aceito, aceito.mean()
-
